@@ -1,0 +1,505 @@
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <ctype.h>
+
+#define MAX 30
+#define STATES 100
+#define SIZE 128
+
+typedef struct
+{
+    int prod;
+    int dot;
+} Item;
+
+typedef struct
+{
+    Item item[MAX * MAX];
+    int count;
+} State;
+
+char L[MAX], R[MAX][MAX];
+char NT[SIZE] = "", T[SIZE] = "";
+
+int n, totalStates = 0;
+char aug;
+
+State states[STATES];
+int trans[STATES][SIZE];
+char ACTION[STATES][SIZE][16];
+int GOTO[STATES][SIZE];
+
+int isNT(char c)
+{
+    return isupper((unsigned char)c);
+}
+
+int contains(char s[], char c)
+{
+    return strchr(s, c) != NULL;
+}
+
+void add(char s[], char c)
+{
+    if (!contains(s, c))
+    {
+        int len = strlen(s);
+        s[len] = c;
+        s[len + 1] = '\0';
+    }
+}
+
+void addItem(State *s, int p, int d)
+{
+    for (int i = 0; i < s->count; i++)
+    {
+        if (s->item[i].prod == p &&
+            s->item[i].dot == d)
+            return;
+    }
+
+    if (s->count < MAX * MAX)
+    {
+        s->item[s->count].prod = p;
+        s->item[s->count].dot = d;
+        s->count++;
+    }
+}
+
+void closure(State *s)
+{
+    int changed;
+
+    do
+    {
+        changed = 0;
+
+        for (int i = 0; i < s->count; i++)
+        {
+            int p = s->item[i].prod;
+            int d = s->item[i].dot;
+
+            char c = R[p][d];
+
+            if (c == '\0' || c == '#')
+                continue;
+
+            if (isNT(c))
+            {
+                for (int j = 1; j <= n; j++)
+                {
+                    if (L[j] == c)
+                    {
+                        int old = s->count;
+                        addItem(s, j, 0);
+
+                        if (s->count > old)
+                            changed = 1;
+                    }
+                }
+            }
+        }
+    } while (changed);
+}
+
+void goTo(State *source, char symbol, State *result)
+{
+    result->count = 0;
+
+    for (int i = 0; i < source->count; i++)
+    {
+        int p = source->item[i].prod;
+        int d = source->item[i].dot;
+
+        if (R[p][d] == symbol)
+            addItem(result, p, d + 1);
+    }
+
+    closure(result);
+}
+
+int sameState(State *a, State *b)
+{
+    if (a->count != b->count)
+        return 0;
+
+    for (int i = 0; i < a->count; i++)
+    {
+        int found = 0;
+
+        for (int j = 0; j < b->count; j++)
+        {
+            if (a->item[i].prod == b->item[j].prod &&
+                a->item[i].dot == b->item[j].dot)
+            {
+                found = 1;
+                break;
+            }
+        }
+
+        if (!found)
+            return 0;
+    }
+
+    return 1;
+}
+
+int findState(State *s)
+{
+    for (int i = 0; i < totalStates; i++)
+    {
+        if (sameState(&states[i], s))
+            return i;
+    }
+
+    return -1;
+}
+
+void buildStates()
+{
+    totalStates = 1;
+    states[0].count = 0;
+
+    addItem(&states[0], 0, 0);
+    closure(&states[0]);
+
+    for (int i = 0; i < STATES; i++)
+    {
+        for (int j = 0; j < SIZE; j++)
+            trans[i][j] = -1;
+    }
+
+    for (int i = 0; i < totalStates; i++)
+    {
+        char symbols[SIZE] = "";
+
+        for (int j = 0; j < states[i].count; j++)
+        {
+            int p = states[i].item[j].prod;
+            int d = states[i].item[j].dot;
+            char c = R[p][d];
+
+            if (c != '\0' && c != '#')
+                add(symbols, c);
+        }
+
+        for (int j = 0; symbols[j]; j++)
+        {
+            char c = symbols[j];
+
+            State temp;
+            goTo(&states[i], c, &temp);
+
+            int id = findState(&temp);
+
+            if (id == -1 && totalStates < STATES)
+            {
+                id = totalStates;
+                states[totalStates++] = temp;
+            }
+
+            if (id != -1)
+                trans[i][(int)c] = id;
+        }
+    }
+}
+
+int addAction(int state, char symbol, char value[])
+{
+    char *cell = ACTION[state][(int)symbol];
+
+    if (cell[0] == '\0')
+    {
+        strcpy(cell, value);
+        return 1;
+    }
+
+    if (strcmp(cell, value) != 0)
+        return 0;
+
+    return 1;
+}
+
+int buildTable()
+{
+    int valid = 1;
+
+    for (int i = 0; i < STATES; i++)
+    {
+        for (int j = 0; j < SIZE; j++)
+        {
+            ACTION[i][j][0] = '\0';
+            GOTO[i][j] = -1;
+        }
+    }
+
+    for (int i = 0; i < totalStates; i++)
+    {
+
+        for (int j = 0; T[j]; j++)
+        {
+            char c = T[j];
+            int next = trans[i][(int)c];
+
+            if (next != -1)
+            {
+                char value[16];
+                sprintf(value, "s%d", next);
+
+                if (!addAction(i, c, value))
+                    valid = 0;
+            }
+        }
+
+        for (int j = 0; NT[j]; j++)
+        {
+            char c = NT[j];
+            GOTO[i][(int)c] = trans[i][(int)c];
+        }
+
+        for (int j = 0; j < states[i].count; j++)
+        {
+            int p = states[i].item[j].prod;
+            int d = states[i].item[j].dot;
+
+            if (R[p][d] != '\0')
+                continue;
+
+            if (p == 0)
+            {
+                if (!addAction(i, '$', "acc"))
+                    valid = 0;
+            }
+            else
+            {
+                char value[16];
+                sprintf(value, "r%d", p);
+
+                for (int k = 0; T[k]; k++)
+                {
+                    if (!addAction(i, T[k], value))
+                        valid = 0;
+                }
+            }
+        }
+    }
+
+    return valid;
+}
+
+void displayTable()
+{
+    printf("\nLR(0) PARSING TABLE\n\n");
+
+    printf("%-10s", "STATE");
+
+    for (int i = 0; T[i]; i++)
+        printf("%-10c", T[i]);
+
+    printf("| ");
+
+    for (int i = 0; NT[i]; i++)
+        printf("%-10c", NT[i]);
+
+    printf("\n");
+
+    for (int i = 0; i < totalStates; i++)
+    {
+        printf("%-10d", i);
+
+        for (int j = 0; T[j]; j++)
+            printf("%-10s", ACTION[i][(int)T[j]]);
+
+        printf("| ");
+
+        for (int j = 0; NT[j]; j++)
+        {
+            int x = GOTO[i][(int)NT[j]];
+
+            if (x == -1)
+                printf("%-10s", "");
+            else
+                printf("%-10d", x);
+        }
+
+        printf("\n");
+    }
+}
+
+void parseString(char input[])
+{
+    int stateStack[500];
+    char symbolStack[500];
+    int top = 0, pos = 0;
+    int steps = 0;
+
+    stateStack[0] = 0;
+
+    printf("\nPARSING TRACE\n\n");
+    printf("%-25s %-20s %s\n", "STACK", "INPUT", "ACTION");
+
+    while (steps++ < 1000)
+    {
+        int state = stateStack[top];
+        char a = input[pos];
+
+        char *action = ACTION[state][(int)a];
+
+        char stack[1000] = "";
+        char temp[30];
+
+        sprintf(stack, "%d", stateStack[0]);
+
+        for (int i = 0; i < top; i++)
+        {
+            sprintf(temp, " %c %d",
+                    symbolStack[i], stateStack[i + 1]);
+            strcat(stack, temp);
+        }
+
+        printf("%-25s %-20s ", stack, input + pos);
+
+        if (action[0] == '\0')
+        {
+            printf("ERROR\n");
+            printf("\nString Rejected.\n");
+            return;
+        }
+
+        if (action[0] == 's')
+        {
+            int next = atoi(action + 1);
+
+            printf("Shift %c\n", a);
+
+            symbolStack[top] = a;
+            stateStack[top + 1] = next;
+            top++;
+            pos++;
+        }
+        else if (action[0] == 'r')
+        {
+            int p = atoi(action + 1);
+            int len = strlen(R[p]);
+
+            if (R[p][0] == '#')
+                len = 0;
+
+            printf("Reduce by %c=%s\n", L[p],
+                   len == 0 ? "#" : R[p]);
+
+            top -= len;
+
+            if (top < 0)
+            {
+                printf("\nString Rejected.\n");
+                return;
+            }
+
+            int next = GOTO[stateStack[top]][(int)L[p]];
+
+            if (next == -1)
+            {
+                printf("\nString Rejected.\n");
+                return;
+            }
+
+            symbolStack[top] = L[p];
+            stateStack[top + 1] = next;
+            top++;
+        }
+        else if (strcmp(action, "acc") == 0)
+        {
+            printf("ACCEPT\n");
+            printf("\nString Accepted!\n");
+            return;
+        }
+    }
+
+    printf("\nParsing stopped: too many steps.\n");
+}
+
+int main()
+{
+    printf("Enter number of productions: ");
+    scanf("%d", &n);
+
+    if (n <= 0 || n >= MAX)
+    {
+        printf("Invalid number of productions.\n");
+        return 0;
+    }
+
+    printf("\nEnter productions (example S=CC):\n");
+
+    for (int i = 1; i <= n; i++)
+    {
+        char line[100];
+
+        scanf("%s", line);
+
+        if (strlen(line) < 3 || line[1] != '=')
+        {
+            printf("Invalid production format.\n");
+            return 0;
+        }
+
+        L[i] = line[0];
+
+        if (strcmp(line + 2, "#") == 0)
+            strcpy(R[i], "");
+        else
+            strcpy(R[i], line + 2);
+
+        add(NT, L[i]);
+    }
+
+    aug = 'Z';
+
+    while (contains(NT, aug))
+        aug--;
+
+    L[0] = aug;
+    R[0][0] = L[1];
+    R[0][1] = '\0';
+
+    for (int i = 1; i <= n; i++)
+    {
+        for (int j = 0; R[i][j]; j++)
+        {
+            char c = R[i][j];
+
+            if (c != '#' && !isNT(c))
+                add(T, c);
+        }
+    }
+
+    add(T, '$');
+
+    buildStates();
+
+    if (!buildTable())
+    {
+        printf("\nGrammar is NOT LR(0).\n");
+        printf("Parsing cannot be performed using an LR(0) table.\n");
+        return 0;
+    }
+
+    printf("\nGrammar is LR(0).\n");
+
+    displayTable();
+
+    char input[500];
+
+    printf("\nEnter input string: ");
+    scanf("%s", input);
+
+    if (input[strlen(input) - 1] != '$')
+        strcat(input, "$");
+
+    parseString(input);
+
+    return 0;
+}
